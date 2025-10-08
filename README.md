@@ -100,27 +100,41 @@ This project gives you a production-leaning WordPress stack with:
 ## 1) Project layout (already provided)
 
 ```
-wordpress-borg/
-├─ docker-compose.yml
-├─ .env                 # do NOT commit
-├─ env_simple.env       # example template
-├─ .gitignore
-├─ db-seed/
-│  └─ 10-prepare-seed.sh   # info-only; import is native on empty volume
-├─ backup/
-│  ├─ Dockerfile
-│  ├─ entrypoint.sh
-│  └─ crontab
-├─ reverse-proxy/
-│  ├─ nginx.conf
-│  ├─ certbot-www/
+/english_blog
+├─ docker-compose.yml          # main compose file
+├─ .env                        # secrets/config (gitignored)
+├─ env_simple.env              # example .env
+├─ .gitignore                  # excludes .env etc.
+│
+├─ db-seed/                    # DB seed logic
+│  └─ 10-prepare-seed.sh       # runs on first boot (if empty volume)
+│
+├─ backup/                     # backup container
+│  ├─ Dockerfile               # builds backup image
+│  ├─ entrypoint.sh            # starts cron, ensures borg repo
+│  ├─ run_once.sh              # one backup run (dump + borg snapshot)
+│  └─ crontab                  # placeholder (real cron written at runtime)
+│
+├─ wpcli-cron/                 # WP-CLI sidecar for plugin manifests
+│  ├─ entrypoint.sh            # loop runner (calls export_once.sh periodically)
+│  └─ export_once.sh           # single manifest export
+│
+├─ certbot/                    # Let's Encrypt handling
+│  ├─ entrypoint.sh            # renewal loop
+│  └─ issue.sh                 # one-time certificate issuance
+│
+├─ reverse-proxy/              # Nginx reverse proxy + ACME webroot
+│  ├─ nginx.conf               # base nginx config
+│  ├─ certbot-www/             # ACME webroot (empty dir, used by certbot)
 │  └─ conf.d/
-│     └─ wordpress.conf
-├─ manifests/
-└─ tools/
-   ├─ export-plugins.sh
-   ├─ install-from-manifest.sh
-   └─ switch-domain.sh
+│     └─ wordpress.conf        # vhost config (http→https, proxy pass)
+│
+├─ manifests/                  # plugin manifests (exported daily by wpcli-cron)
+│
+└─ tools/                      # helper scripts
+   ├─ export-plugins.sh        # manual manifest export
+   ├─ install-from-manifest.sh # reinstall/activate from manifest
+   └─ switch-domain.sh         # safe domain switch
 ```
 
 > Ensure `db-seed/10-prepare-seed.sh`, `backup/entrypoint.sh`, and `tools/*.sh` are executable.

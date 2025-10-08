@@ -1,0 +1,69 @@
+.env
+
+# ==========================================================
+# Editor swap / temporary files
+# ==========================================================
+*.swp                  # Vim/Neovim swap files
+*.log                  # Log files created during container runs
+*.tmp                  # Temporary files
+*.bak                  # Backup files from editors
+
+# ==========================================================
+# Environment files
+# ==========================================================
+.env                   # Main environment file (contains passwords & secrets)
+*.env                  # Any other env files, just in case
+!env_simple.env        # Keep the public example (safe to commit)
+
+# ==========================================================
+# Docker runtime data and cache
+# ==========================================================
+docker-compose.override.yml  # Local overrides — developer-specific
+**/.dockerignore             # Avoid recursive inclusion
+**/.docker                   # Local Docker metadata (if any)
+**/tmp/                      # Temporary build/output folders
+
+# ==========================================================
+# Database seed and dumps
+# ==========================================================
+db-seed/seed.sql       # Contains exported data (sensitive)
+db-seed/*.sql          # Any other database dumps (sensitive)
+!db-seed/10-prepare-seed.sh   # Keep initialization script in repo
+
+# ==========================================================
+# Backup repository
+# ==========================================================
+backups/               # Borg repo and backup archives (contains credentials)
+!backups/.gitkeep      # Keep folder structure only
+
+# ==========================================================
+# Certbot generated files (certificates / keys)
+# ==========================================================
+certbot/conf/*         # Certificates and private keys — sensitive
+!certbot/conf/.gitkeep # Keep folder
+certbot/www/*          # ACME HTTP challenge temp files
+!certbot/www/.gitkeep  # Keep folder
+
+# ==========================================================
+# WordPress & MariaDB persistent data
+# ==========================================================
+data/                  # Persistent volumes (db & wp-content)
+!data/.gitkeep         # Keep empty folder for structure
+
+# ==========================================================
+# Reverse proxy cache/logs
+# ==========================================================
+reverse-proxy/logs/    # Access/error logs
+reverse-proxy/cache/   # Proxy cache files
+
+# ==========================================================
+# Safe files to keep under version control
+# ==========================================================
+!README.md
+!LICENSE
+!docker-compose.yml
+!*.sh
+!*.conf
+!*.Dockerfile
+!Makefile
+!env_simple.env
