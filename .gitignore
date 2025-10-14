@@ -28,6 +28,10 @@ docker-compose.override.yml  # Local overrides — developer-specific
 # ==========================================================
 db-seed/seed.sql       # Contains exported data (sensitive)
 db-seed/*.sql          # Any other database dumps (sensitive)
+db-seed/*.sql.gz       # Compressed database dumps (sensitive)
+db-seed/*.sha256       # Checksum files for dumps
+db-seed/.db_status     # Database status file
+db-seed/.seed_status   # Seed status file
 !db-seed/10-prepare-seed.sh   # Keep initialization script in repo
 
 # ==========================================================
@@ -48,8 +52,7 @@ certbot/www/*          # ACME HTTP challenge temp files
 # WordPress & MariaDB persistent data
 # ==========================================================
 db_data/                  # Persistent volumes (db & wp-content)
-!data/.gitkeep         # Keep empty folder for structure
-wp_data/
+wp_data/                  # WordPress persistent data
 
 # ==========================================================
 # Reverse proxy cache/logs
