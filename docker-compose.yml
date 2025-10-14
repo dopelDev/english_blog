@@ -1,0 +1,103 @@
+services:
+  # ----------------------------
+  # Pre-initialization check
+  # Verify if persistent data already exists before starting DB
+  # ----------------------------
+  db-pre-init:
+    image: alpine:latest
+    container_name: db_pre_init
+    volumes:
+      - ./db_data:/check_data  # Read-write to create directory if needed
+      - ./db-seed:/shared  # Shared volume for status (read-write)
+    command:
+      - sh
+      - -c
+      - |
+        # Ensure db_data directory exists
+        mkdir -p /check_data
+        
+        if [ -d "/check_data/mysql" ] && [ "$(ls -A /check_data/mysql 2>/dev/null)" ]; then
+          echo "✅ Persistent data found - DB already initialized"
+          echo "PERSISTENT_DATA=true" > /shared/.db_status
+          echo "SEED_NEEDED=false" > /shared/.seed_status
+        else
+          echo "🆕 No persistent data - DB needs initialization"
+          echo "PERSISTENT_DATA=false" > /shared/.db_status
+          echo "SEED_NEEDED=true" > /shared/.seed_status
+        fi
+        exit 0
+    restart: "no"
+    profiles: ["core"]
+
+  # ----------------------------
+  # MariaDB (core)
+  # ----------------------------
+  db:
+    image: mariadb:11.4
+    container_name: db
+    restart: unless-stopped
+    env_file:
+      - ./env_simple.env # pulls MYSQL_*, TZ, etc.
+    volumes:
+      - ./db_data:/var/lib/mysql # persistent data
+    networks:
+      - backend
+    healthcheck:
+      # Use credentials from env (note: $$ to avoid compose interpolation)
+      test:
+        [
+          "CMD-SHELL",
+          "mariadb-admin --skip-ssl ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      db-pre-init:
+        condition: service_completed_successfully
+    profiles: ["core"]
+
+  # ------------------------------------------
+  # Seed-on-boot (one-shot after DB is healthy)
+  # Only runs if pre-init determined seed is needed
+  # ------------------------------------------
+  seed-on-boot:
+    image: mariadb:11.4
+    container_name: seed_on_boot
+    env_file:
+      - ./env_simple.env
+    environment:
+      - SEED_MODE=auto  # Changed to auto to verify if DB is empty
+      - SEED_STRICT=false
+    working_dir: /db-seed
+    entrypoint:
+      - sh
+      - -c
+      - |
+        # Check if seed is needed based on pre-init status
+        if [ -f "/db-seed/.seed_status" ] && grep -q "SEED_NEEDED=true" /db-seed/.seed_status; then
+          echo "🌱 Seed is needed - proceeding with seed process"
+          exec /bin/sh ./10-prepare-seed.sh
+        else
+          echo "ℹ️ Seed not needed - DB already has persistent data"
+          echo "✅ Skipping seed process"
+          exit 0
+        fi
+    volumes:
+      - ./db-seed:/db-seed
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    profiles: ["ops"]
+    deploy:
+      restart_policy:
+        condition: none
+
+volumes:
+  db_data:
+
+networks:
+  backend:

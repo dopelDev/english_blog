@@ -47,7 +47,7 @@ certbot/www/*          # ACME HTTP challenge temp files
 # ==========================================================
 # WordPress & MariaDB persistent data
 # ==========================================================
-data/                  # Persistent volumes (db & wp-content)
+db_data/                  # Persistent volumes (db & wp-content)
 !data/.gitkeep         # Keep empty folder for structure
 
 # ==========================================================
