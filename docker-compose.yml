@@ -96,8 +96,36 @@ services:
       restart_policy:
         condition: none
 
+  # ----------------------------
+  # WordPress (core)
+  # ----------------------------
+  wordpress:
+    image: wordpress:php8.2-apache
+    container_name: wordpress
+    restart: unless-stopped
+    env_file:
+      - ./env_simple.env
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+      WORDPRESS_TABLE_PREFIX: ${WP_TABLE_PREFIX}
+      WORDPRESS_DEBUG: ${WP_DEBUG}
+    volumes:
+      - wp_data:/var/www/html
+    ports:
+      - "8080:80"  # Acceder directamente en http://localhost:8080
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles: ["core"]
+
 volumes:
   db_data:
+  wp_data:
 
 networks:
   backend:

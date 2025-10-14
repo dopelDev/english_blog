@@ -4,7 +4,7 @@
 # Clean up the current Docker Compose project in this order:
 #   1) Stop containers
 #   2) Remove containers
-#   3) Remove volumes (by default)
+#   3) Remove volumes (by default) - includes db_data and wp_data named volumes
 #   4) Remove networks (by default)
 #   5) Remove bind mount directories (db_data) - requires sudo
 #   6) Remove generated SQL seed files
@@ -58,6 +58,11 @@ if [ "$KEEP_VOLUMES" = false ]; then
   else
     echo "   No volumes to remove."
   fi
+  
+  # Also remove specific named volumes that might not have labels
+  echo "   Removing named volumes (db_data, wp_data)..."
+  docker volume rm "${PROJECT_NAME}_db_data" 2>/dev/null || true
+  docker volume rm "${PROJECT_NAME}_wp_data" 2>/dev/null || true
 else
   echo "🔹 Keeping volumes (flag --volumes is active)"
 fi

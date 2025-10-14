@@ -49,6 +49,7 @@ certbot/www/*          # ACME HTTP challenge temp files
 # ==========================================================
 db_data/                  # Persistent volumes (db & wp-content)
 !data/.gitkeep         # Keep empty folder for structure
+wp_data/
 
 # ==========================================================
 # Reverse proxy cache/logs
