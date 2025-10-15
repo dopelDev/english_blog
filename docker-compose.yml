@@ -1,34 +1,8 @@
 services:
-  # ----------------------------
-  # Pre-initialization check
-  # Verify if persistent data already exists before starting DB
-  # ----------------------------
-  db-pre-init:
-    image: alpine:latest
-    container_name: db_pre_init
-    volumes:
-      - ./db_data:/check_data  # Read-write to create directory if needed
-      - ./db-seed:/shared  # Shared volume for status (read-write)
-    command:
-      - sh
-      - -c
-      - |
-        # Ensure db_data directory exists
-        mkdir -p /check_data
-        
-        if [ -d "/check_data/mysql" ] && [ "$(ls -A /check_data/mysql 2>/dev/null)" ]; then
-          echo "✅ Persistent data found - DB already initialized"
-          echo "PERSISTENT_DATA=true" > /shared/.db_status
-          echo "SEED_NEEDED=false" > /shared/.seed_status
-        else
-          echo "🆕 No persistent data - DB needs initialization"
-          echo "PERSISTENT_DATA=false" > /shared/.db_status
-          echo "SEED_NEEDED=true" > /shared/.seed_status
-        fi
-        exit 0
-    restart: "no"
-    profiles: ["core"]
-
+  # ========================================
+  # CORE PROFILE - Essential services only
+  # ========================================
+  
   # ----------------------------
   # MariaDB (core)
   # ----------------------------
@@ -37,13 +11,12 @@ services:
     container_name: db
     restart: unless-stopped
     env_file:
-      - ./env_simple.env # pulls MYSQL_*, TZ, etc.
+      - ./env_simple.env
     volumes:
-      - ./db_data:/var/lib/mysql # persistent data
+      - db_data:/var/lib/mysql
     networks:
       - backend
     healthcheck:
-      # Use credentials from env (note: $$ to avoid compose interpolation)
       test:
         [
           "CMD-SHELL",
@@ -52,49 +25,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    depends_on:
-      db-pre-init:
-        condition: service_completed_successfully
     profiles: ["core"]
-
-  # ------------------------------------------
-  # Seed-on-boot (one-shot after DB is healthy)
-  # Only runs if pre-init determined seed is needed
-  # ------------------------------------------
-  seed-on-boot:
-    image: mariadb:11.4
-    container_name: seed_on_boot
-    env_file:
-      - ./env_simple.env
-    environment:
-      - SEED_MODE=auto  # Changed to auto to verify if DB is empty
-      - SEED_STRICT=false
-    working_dir: /db-seed
-    entrypoint:
-      - sh
-      - -c
-      - |
-        # Check if seed is needed based on pre-init status
-        if [ -f "/db-seed/.seed_status" ] && grep -q "SEED_NEEDED=true" /db-seed/.seed_status; then
-          echo "🌱 Seed is needed - proceeding with seed process"
-          exec /bin/sh ./10-prepare-seed.sh
-        else
-          echo "ℹ️ Seed not needed - DB already has persistent data"
-          echo "✅ Skipping seed process"
-          exit 0
-        fi
-    volumes:
-      - ./db-seed:/db-seed
-    networks:
-      - backend
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: "no"
-    profiles: ["ops"]
-    deploy:
-      restart_policy:
-        condition: none
 
   # ----------------------------
   # WordPress (core)
@@ -115,12 +46,106 @@ services:
     volumes:
       - wp_data:/var/www/html
     ports:
-      - "8080:80"  # Acceder directamente en http://localhost:8080
+      - "8080:80"
     networks:
       - backend
     depends_on:
       db:
         condition: service_healthy
+    profiles: ["core"]
+
+  # ----------------------------
+  # Backup System (core)
+  # ----------------------------
+  backup:
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    container_name: backup
+    restart: unless-stopped
+    env_file:
+      - ./env_simple.env
+    environment:
+      - BORG_REPO=${BORG_REPO}
+      - BORG_PASSPHRASE=${BORG_PASSPHRASE}
+      - DB_HOST=${MYSQL_HOST}
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_NAME=${MYSQL_DATABASE}
+      - BACKUP_RETENTION_DAILY=${BACKUP_RETENTION_DAILY}
+      - BACKUP_RETENTION_WEEKLY=${BACKUP_RETENTION_WEEKLY}
+      - BACKUP_RETENTION_MONTHLY=${BACKUP_RETENTION_MONTHLY}
+      - BACKUP_SOURCE_PATH=/var/www/html
+    volumes:
+      - ./backup/repos:/backup/repos
+      - ./backup/logs:/backup/logs
+      - wp_data:/var/www/html
+      - db_data:/var/lib/mysql
+    networks:
+      - backend
+    depends_on:
+      - db
+      - wordpress
+    profiles: ["core"]
+
+  # ========================================
+  # OPS PROFILE - Operational services
+  # ========================================
+
+  # ----------------------------
+  # Complete prep process (ops)
+  # ----------------------------
+  prep:
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    container_name: prep
+    env_file:
+      - ./env_simple.env
+    environment:
+      - BORG_REPO=${BORG_REPO}
+      - BORG_PASSPHRASE=${BORG_PASSPHRASE}
+      - DB_HOST=${MYSQL_HOST}
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_NAME=${MYSQL_DATABASE}
+      - DB_VOLUME_PATH=/check_db_data
+      - WP_VOLUME_PATH=/check_wp_data
+      - STATUS_FILE=/tmp/prep_status
+    volumes:
+      - db_data:/check_db_data
+      - wp_data:/check_wp_data
+      - ./backup/repos:/backup/repos
+      - ./prep:/scripts
+    networks:
+      - backend
+    command:
+      - sh
+      - /scripts/prep-volumes-only.sh
+    restart: "no"
+    profiles: ["ops"]
+
+  # ----------------------------
+  # WP-CLI (core)
+  # ----------------------------
+  wpcli:
+    image: wordpress:cli
+    container_name: wpcli
+    env_file:
+      - ./env_simple.env
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - wp_data:/var/www/html
+      - ./manifests:/manifests
+    networks:
+      - backend
+    depends_on:
+      - wordpress
+    command: ["tail", "-f", "/dev/null"]
     profiles: ["core"]
 
 volumes:

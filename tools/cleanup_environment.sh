@@ -7,11 +7,11 @@
 #   3) Remove volumes (by default) - includes db_data and wp_data named volumes
 #   4) Remove networks (by default)
 #   5) Remove bind mount directories (db_data) - requires sudo
-#   6) Remove generated SQL seed files
+#   6) Remove generated backup files
 #
 # Flags:
 #   --volumes    Keep volumes (do not delete them)
-#   --keep-seeds Keep SQL seed files (do not delete them)
+#   --keep-backups Keep backup files (do not delete them)
 #
 # Environment:
 #   PROJECT_NAME   Optional: project name
@@ -23,7 +23,7 @@
 set -euo pipefail
 
 KEEP_VOLUMES=false
-KEEP_SEEDS=false
+KEEP_BACKUPS=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -32,8 +32,8 @@ while [[ $# -gt 0 ]]; do
       KEEP_VOLUMES=true
       shift
       ;;
-    --keep-seeds)
-      KEEP_SEEDS=true
+    --keep-backups)
+      KEEP_BACKUPS=true
       shift
       ;;
     --help)
@@ -41,14 +41,14 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --volumes     Keep volumes (do not delete them)"
-      echo "  --keep-seeds  Keep SQL seed files (do not delete them)"
+      echo "  --keep-backups Keep backup files (do not delete them)"
       echo "  --help        Show this help message"
       echo ""
       echo "Examples:"
       echo "  $0                    # Full cleanup (removes everything)"
       echo "  $0 --volumes          # Keep volumes, remove everything else"
-      echo "  $0 --keep-seeds      # Keep SQL seeds, remove everything else"
-      echo "  $0 --volumes --keep-seeds  # Keep both volumes and SQL seeds"
+      echo "  $0 --keep-backups    # Keep backup files, remove everything else"
+      echo "  $0 --volumes --keep-backups  # Keep both volumes and backup files"
       exit 0
       ;;
     *)
@@ -119,39 +119,32 @@ else
   echo "   No ./db_data directory found."
 fi
 
-# === 6) Remove generated SQL seed files (unless --keep-seeds flag is set) ===
-if [ "$KEEP_SEEDS" = false ]; then
-  echo "➡️  Removing generated SQL seed files..."
-  SEED_FILES_FOUND=false
+# === 6) Remove generated backup files (unless --keep-backups flag is set) ===
+if [ "$KEEP_BACKUPS" = false ]; then
+  echo "➡️  Removing generated backup files..."
+  BACKUP_FILES_FOUND=false
 
-  # Remove timestamped seed files (pattern: seed_YYYYMMDD_HHMMSS.sql*)
-  if ls ./db-seed/seed_*.sql* 1> /dev/null 2>&1; then
-    echo "   Removing timestamped seed files..."
-    rm -f ./db-seed/seed_*.sql* || true
-    SEED_FILES_FOUND=true
+  # Remove backup repository
+  if [ -d "./backup/repos" ] && [ "$(ls -A ./backup/repos 2>/dev/null)" ]; then
+    echo "   Removing backup repository..."
+    rm -rf ./backup/repos/* || true
+    BACKUP_FILES_FOUND=true
   fi
 
-  # Remove latest symlinks
-  if [ -L "./db-seed/seed_latest.sql" ] || [ -L "./db-seed/seed_latest.sql.gz" ]; then
-    echo "   Removing latest symlinks..."
-    rm -f ./db-seed/seed_latest.sql* || true
-    SEED_FILES_FOUND=true
+  # Remove backup logs
+  if [ -d "./backup/logs" ] && [ "$(ls -A ./backup/logs 2>/dev/null)" ]; then
+    echo "   Removing backup logs..."
+    rm -rf ./backup/logs/* || true
+    BACKUP_FILES_FOUND=true
   fi
 
-  # Remove any other generated seed files
-  if ls ./db-seed/*.sql* 1> /dev/null 2>&1; then
-    echo "   Removing other SQL files..."
-    rm -f ./db-seed/*.sql* || true
-    SEED_FILES_FOUND=true
-  fi
-
-  if [ "$SEED_FILES_FOUND" = true ]; then
-    echo "   ✅ Generated SQL seed files removed."
+  if [ "$BACKUP_FILES_FOUND" = true ]; then
+    echo "   ✅ Generated backup files removed."
   else
-    echo "   No generated SQL seed files found."
+    echo "   No generated backup files found."
   fi
 else
-  echo "🔹 Keeping SQL seed files (flag --keep-seeds is active)"
+  echo "🔹 Keeping backup files (flag --keep-backups is active)"
 fi
 
 # === 7) Final summary ===

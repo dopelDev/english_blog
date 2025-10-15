@@ -1,391 +1,339 @@
 # english_blog
-A Simple blog using Wordpress
+A Simple blog using WordPress with intelligent volume-based backup and restore system
 
-# Overview 
+## Overview
 
-This project gives you a production-leaning WordPress stack with:
+This project provides a production-ready WordPress stack with:
 
 * **WordPress (Apache) + MariaDB** with persistent volumes
-* **Nginx reverse proxy** with **Let’s Encrypt (Certbot)** for HTTPS
-* A **seed/restore flow**:
+* **Intelligent volume snapshot system** with automatic detection
+* **Borg backup integration** for reliable volume protection
+* **Profile-based deployment** (core vs operational services)
+* **Simplified architecture** using only volume snapshots (no SQL dumps)
 
-  * On a **fresh** DB volume: if there’s a `db-seed/*.sql` → it’s imported once; otherwise → **clean install**
-  * After every backup, the **latest dump** is written to `db-seed/seed.sql` so a future fresh boot can auto-restore
-* A **backup service** (cron) that does:
+## Architecture
 
-  1. `mysqldump` (database)
-  2. **Borg** snapshot of: database dumps, **WordPress files** (plugins/themes/uploads + `wp-config.php`), and **plugin manifests**
-* **WP-CLI** for admin tasks and a **WP-CLI cron sidecar** that exports **plugin manifests** daily
-* **Domain migration tools**: a script to switch the site domain safely (serialized URLs handled), and manifest-based plugin reinstalls
+### Core Profile (Essential Services)
+- **db**: MariaDB 11.4 with persistent data
+- **wordpress**: WordPress with persistent files and integrated WP-CLI
+- **backup**: Scheduled backup system with cron jobs
 
-## Components
+### Ops Profile (Operational Services)
+- **prep**: Complete prep process (volume detection + manual backup + restore)
 
-* **db**: `mariadb:11` with `db_data` volume; imports `db-seed/*.sql` only on first boot with an empty volume
-* **wordpress**: `wordpress:php8.2-apache` with `wp_data` volume
-* **nginx**: reverse proxy for :80/:443 and ACME webroot
-* **certbot**: renews certificates periodically (webroot method)
-* **backup**: Alpine container with `mariadb-client + borgbackup + crond`
-* **wpcli**: `wordpress:cli` for manual commands
-* **wpcli-cron**: periodically exports **plugin manifests** into `./manifests/`, which are also backed up by Borg
+## How It Works
 
-## Volumes & important folders
+### 🔄 **Intelligent Volume-Based Process**
 
-* Docker volumes:
+When you start the stack, the system automatically determines the best action:
 
-  * `db_data`: MariaDB data directory
-  * `wp_data`: WordPress files (`/var/www/html`)
-  * `dumps`: raw `.sql` dumps created before Borg snapshots
-  * `borg_repo`: local Borg repository (archives)
-  * `letsencrypt`: persisted TLS certs and metadata
-* Bind mounts in the repo:
+**Scenario 1: Volumes Exist (Maintenance Restart)**
+1. **Prep** detects existing data in both volumes
+2. **Prep** creates Borg snapshots of complete volumes (manual backup)
+3. **WordPress** continues with existing data
 
-  * `db-seed/`: contains **only one** file after backups → `seed.sql` (latest DB dump)
-  * `manifests/`: `plugins.json` and `plugins_active.txt` plus timestamped versions
-  * `reverse-proxy/`: nginx config + ACME webroot
+**Scenario 2: Volumes Empty (Fresh Deploy)**
+1. **Prep** detects empty volumes
+2. **Prep** searches for volume snapshots and restores if available
+3. **WordPress** loads restored data or fresh install
 
-## First-boot behavior
+**Scenario 3: Partial Data**
+1. **Prep** detects mixed state
+2. **Prep** attempts to restore missing volumes
+3. **WordPress** continues with available data
 
-* If `db_data` is **empty**:
+### 📦 **Volume Snapshot System**
 
-  * If `db-seed/seed.sql` (or any `*.sql`) exists → MariaDB auto-imports it once
-  * If there’s **no** seed → WordPress runs a **clean install**
-* If `db_data` already has data → **no import occurs** (MariaDB’s native behavior)
+- **Volume snapshots**: Complete volume backups using Borg
+- **Scheduled backups**: Automatic cron-based volume snapshots
+- **Borg integration**: Encrypted, deduplicated volume storage
+- **Retention policies**: Daily, weekly, monthly keeps
+- **Manual triggers**: On-demand volume snapshot creation
+- **Always running**: Part of core services for continuous protection
+- **Simplified approach**: No SQL dumps, only complete volume snapshots
 
-## Backups & retention
+## Quick Start
 
-* The `backup` service’s cron job:
-
-  * Runs `mysqldump` to `/dumps/<db>_<timestamp>.sql`
-  * Updates `db-seed/seed.sql` to that **latest** dump (and removes other `*.sql` there)
-  * Creates a **Borg** archive named `wpdb-files-<timestamp>` containing:
-
-    * `/dumps` (all SQL dumps)
-    * WordPress files (`/var/www/html/wp-content`, `wp-config.php`) excluding caches
-    * `/manifests` (plugin manifests exported by `wpcli-cron`)
-  * Optionally prunes old Borg archives (daily/weekly/monthly keeps)
-
-## TLS
-
-* ACME HTTP-01 (webroot) via Nginx + Certbot:
-
-  * You run a **one-time issuance** command
-  * Certbot container auto-renews twice a day
-  * After issuance/renewal, reload Nginx (`nginx -s reload`) so it picks up new certs
-
-## Plugin manifests
-
-* `wpcli-cron` writes:
-
-  * `manifests/plugins.json` (full list with status)
-  * `manifests/plugins_active.txt` (slugs of active plugins)
-  * Timestamped snapshots of both (useful for history)
-* Manifests are **included** in Borg backups for reliable rebuilds
-
-## Domain switching
-
-* `tools/switch-domain.sh OLD NEW` uses `wp search-replace` (safe for serialized data) and updates `home`/`siteurl`.
-* You can move the entire instance to a new domain and correct URLs in the DB.
-
----
-
-# Usage (Step-by-Step)
-
-## 0) Prerequisites
-
-* **DNS**: `LE_DOMAIN` A/AAAA record must point to this server’s IP
-* **Firewall**: open TCP **80** and **443**
-* **Docker & Compose** installed
-* A Borg passphrase set in `.env` (and enough disk space)
-
-## 1) Project layout (already provided)
-
-```
-/english_blog
-├─ docker-compose.yml          # main compose file
-├─ .env                        # secrets/config (gitignored)
-├─ env_simple.env              # example .env
-├─ .gitignore                  # excludes .env etc.
-│
-├─ db-seed/                    # DB seed logic
-│  └─ 10-prepare-seed.sh       # runs on first boot (if empty volume)
-│
-├─ backup/                     # backup container
-│  ├─ Dockerfile               # builds backup image
-│  ├─ entrypoint.sh            # starts cron, ensures borg repo
-│  ├─ run_once.sh              # one backup run (dump + borg snapshot)
-│  └─ crontab                  # placeholder (real cron written at runtime)
-│
-├─ wpcli-cron/                 # WP-CLI sidecar for plugin manifests
-│  ├─ entrypoint.sh            # loop runner (calls export_once.sh periodically)
-│  └─ export_once.sh           # single manifest export
-│
-├─ certbot/                    # Let's Encrypt handling
-│  ├─ entrypoint.sh            # renewal loop
-│  └─ issue.sh                 # one-time certificate issuance
-│
-├─ reverse-proxy/              # Nginx reverse proxy + ACME webroot
-│  ├─ nginx.conf               # base nginx config
-│  ├─ certbot-www/             # ACME webroot (empty dir, used by certbot)
-│  └─ conf.d/
-│     └─ wordpress.conf        # vhost config (http→https, proxy pass)
-│
-├─ manifests/                  # plugin manifests (exported daily by wpcli-cron)
-│
-└─ tools/                      # helper scripts
-   ├─ export-plugins.sh        # manual manifest export
-   ├─ install-from-manifest.sh # reinstall/activate from manifest
-   └─ switch-domain.sh         # safe domain switch
-```
-
-> Ensure `db-seed/10-prepare-seed.sh`, `backup/entrypoint.sh`, and `tools/*.sh` are executable.
+### 1. **Configure Environment**
 
 ```bash
-chmod +x db-seed/10-prepare-seed.sh backup/entrypoint.sh tools/*.sh
-```
-
-## 2) Configure environment
-
-Copy the example and edit values:
-
-```bash
+# Copy environment template
 cp env_simple.env .env
+
+# Edit with your values
+nano .env
 ```
 
-**Key variables (from `.env`):**
+**Essential Variables:**
+- `MYSQL_ROOT_PASSWORD`: Database root password
+- `MYSQL_DATABASE`: Database name (default: wordpress)
+- `MYSQL_USER`: Database user (default: wpuser)
+- `MYSQL_PASSWORD`: Database password
+- `BORG_PASSPHRASE`: Backup encryption key
 
-| Variable                   | Required | Example                     | Notes                                  |
-| -------------------------- | -------- | --------------------------- | -------------------------------------- |
-| `TZ`                       | yes      | `America/Lima`              | Container timezone                     |
-| `MYSQL_ROOT_PASSWORD`      | yes      | `change_me_root`            | MariaDB root                           |
-| `MYSQL_DATABASE`           | yes      | `wordpress`                 | DB name                                |
-| `MYSQL_USER`               | yes      | `wpuser`                    | App user                               |
-| `MYSQL_PASSWORD`           | yes      | `change_me_user`            | App password                           |
-| `CRON_SCHEDULE`            | yes      | `0 3 * * *`                 | Backup time (cron)                     |
-| `BORG_PASSPHRASE`          | yes      | `change_me_borg_passphrase` | Borg repo key                          |
-| `PLUGINS_INTERVAL_SECONDS` | optional | `86400`                     | How often wpcli-cron exports manifests |
-| `LE_DOMAIN`                | yes      | `your-domain.com`           | Public domain                          |
-| `LE_EMAIL`                 | yes      | `admin@your-domain.com`     | For Let’s Encrypt                      |
-
-> `.env` is already in `.gitignore`. Keep it secret.
-
-## 3) Start the stack
+### 2. **Start the Stack**
 
 ```bash
+# Full stack (core + ops)
+docker compose --env-file env_simple.env --profile core --profile ops up -d --build
+
+# Or start profiles separately
+docker compose --env-file env_simple.env --profile core up -d    # Essential services + backup
+docker compose --env-file env_simple.env --profile ops up -d     # Prep process only
+```
+
+### 3. **Access WordPress**
+
+- **URL**: http://localhost:8080
+- **First time**: WordPress installation wizard
+- **Existing data**: Your site loads immediately
+
+## Usage Scenarios
+
+### 🆕 **Fresh Deployment**
+
+```bash
+# Clean start
+docker compose down -v
 docker compose up -d --build
+
+# System will:
+# 1. Detect empty volumes
+# 2. Look for volume snapshots
+# 3. Restore if available, or start fresh
 ```
 
-* This creates volumes and starts db, wordpress, nginx, certbot, backup, wpcli-cron
-* First boot: if `db_data` is empty and there’s a `db-seed/seed.sql`, it will be imported automatically; otherwise, WordPress launches clean
-
-## 4) Issue the initial TLS certificate (one-time)
-
-1. Make sure Nginx is up and serving `/.well-known/acme-challenge/`:
+### 🔧 **Maintenance Restart**
 
 ```bash
-docker compose ps nginx
+# Restart with existing data
+docker compose down
+docker compose up -d
+
+# System will:
+# 1. Detect existing volumes
+# 2. Create volume snapshots
+# 3. Continue with existing data
 ```
 
-2. Run certbot issuance:
+### 🔄 **Data Migration**
 
 ```bash
-docker compose run --rm certbot certonly \
-  --webroot -w /var/www/certbot \
-  -d "${LE_DOMAIN}" \
-  --email "${LE_EMAIL}" --agree-tos --non-interactive --rsa-key-size 4096
+# Migrate to new server
+# 1. Copy backup repository
+# 2. Set environment variables
+# 3. Start stack
+docker compose up -d --build
+
+# System will:
+# 1. Detect empty volumes
+# 2. Find volume snapshots
+# 3. Restore complete environment
 ```
 
-3. Reload Nginx to pick the new cert:
+## Testing
+
+### **Test Different Scenarios**
 
 ```bash
-docker compose exec nginx nginx -s reload
+# Test volume backup functionality
+./tools/test-backup-core.sh
+
+# Test profile combinations
+./tools/test-profiles.sh
+
+# Test complete flow with WP-CLI
+./tools/test-wp-cli-flow.sh
 ```
 
-4. Visit: `https://your-domain.com`
+### **Available Test Scenarios**
 
-> Renewals happen automatically inside the `certbot` container.
-> After a renewal, run `docker compose exec nginx nginx -s reload`.
-> (If you want this automated, we can add a tiny watcher later.)
+1. **Volume backup** (volumes with data)
+2. **Fresh deploy** (no volumes)
+3. **Maintenance restart** (existing volumes)
+4. **Complete flow** (WP-CLI integration)
+5. **Show current status**
+6. **Clean up everything**
 
-## 5) Verify everything
+## Backup Management
 
-* WordPress should respond over **HTTPS**
-* `wpcli-cron` will create:
-
-  * `manifests/plugins.json`
-  * `manifests/plugins_active.txt`
-    (and timestamped copies) within its interval (default \~24h). To run once immediately:
+### **Manual Volume Backup**
 
 ```bash
-docker compose run --rm wpcli --path=/var/www/html plugin list --format=json > manifests/plugins.json
-docker compose run --rm wpcli --path=/var/www/html plugin list \
-  --format=csv --fields=name,status \
-  | awk -F, 'NR>1 && $2=="active"{print $1}' > manifests/plugins_active.txt
+# Trigger manual volume backup (automatic on maintenance restart)
+docker compose --profile core --profile ops up -d
+
+# Check prep logs for manual backup
+docker compose logs prep
 ```
 
-## 6) Run a backup **now** (on-demand test)
+### **Scheduled Volume Backups**
 
 ```bash
-docker compose exec wp_backup /bin/sh -lc '/opt/backup/run_once.sh'
+# View backup status
+docker compose logs backup
+
+# List Borg volume archives
+docker compose exec backup borg list /backup/repos/backup-repo
 ```
 
-This will:
-
-* Create a DB dump in `/dumps`
-* Update `db-seed/seed.sql` with that latest dump
-* Create a Borg archive with `/dumps`, WordPress files (plugins/uploads/themes + `wp-config.php`), and `/manifests`
-* Optionally prune older Borg archives (based on keep-policies)
-
-### Check Borg archives
+### **Restore from Volume Snapshots**
 
 ```bash
-# inside the backup container
-docker compose exec wp_backup sh -lc 'borg list "${BORG_REPO}"'
+# Restore from volume snapshots (automatic on fresh deploy)
+docker compose --profile core --profile ops up -d
+
+# Check prep logs for restore
+docker compose logs prep
 ```
 
-## 7) Routine operations
+## Project Structure
 
-### Trigger manual backups
-
-```bash
-docker compose exec wp_backup /bin/sh -lc '/opt/backup/run_once.sh'
+```
+english_blog/
+├── docker-compose.yml          # Main compose file
+├── env_simple.env              # Environment template
+├── .env                        # Your configuration (gitignored)
+│
+├── prep/                       # Volume detection and management
+│   └── prep-volumes-only.sh    # Complete prep logic (volumes only)
+│
+├── backup/                     # Volume backup system
+│   ├── Dockerfile              # Backup container
+│   ├── entrypoint.sh          # Cron scheduler
+│   ├── run_once.sh            # Single backup
+│   └── crontab                # Schedule config
+│
+└── tools/                      # Testing tools
+    ├── test-backup-core.sh     # Volume backup tests
+    ├── test-profiles.sh        # Profile tests
+    ├── test-wp-cli-flow.sh     # Complete flow tests
+    ├── test-complete-flow.sh   # Flow tests
+    ├── cleanup_environment.sh  # Environment cleanup
+    ├── export-plugins.sh       # Plugin export
+    ├── install-from-manifest.sh # Plugin install
+    └── switch-domain.sh        # Domain migration
 ```
 
-### Export plugin manifests (manual)
+## Environment Variables
 
+### **Database Configuration**
 ```bash
-./tools/export-plugins.sh
+MYSQL_ROOT_PASSWORD=your_secure_root_pass
+MYSQL_DATABASE=wordpress
+MYSQL_USER=wpuser
+MYSQL_PASSWORD=your_secure_user_pass
 ```
 
-### Reinstall plugins from a manifest
-
+### **Backup Configuration**
 ```bash
-./tools/install-from-manifest.sh               # uses manifests/plugins_active.txt
-# or
-./tools/install-from-manifest.sh path/to/another_list.txt
+BORG_REPO=/backup/repos/backup-repo
+BORG_PASSPHRASE=your_borg_passphrase
+BACKUP_RETENTION_DAILY=7
+BACKUP_RETENTION_WEEKLY=4
+BACKUP_RETENTION_MONTHLY=6
 ```
 
-### Switch domain (e.g., migration to a new hostname)
+### **WordPress Configuration**
+```bash
+WP_TABLE_PREFIX=wp_
+WP_DEBUG=false
+```
+
+## Troubleshooting
+
+### **Common Issues**
+
+**Volumes not detected:**
+```bash
+# Check volume status
+docker volume ls
+docker volume inspect english_blog_db_data
+docker volume inspect english_blog_wp_data
+```
+
+**Volume backup not working:**
+```bash
+# Check backup logs
+docker compose logs backup
+docker compose logs prep
+```
+
+**Volume restore not working:**
+```bash
+# Check prep logs for restore
+docker compose logs prep
+```
+
+**Clean restart:**
+```bash
+# Complete cleanup
+docker compose down -v
+docker volume rm english_blog_db_data english_blog_wp_data
+docker system prune -f
+```
+
+### **Logs and Monitoring**
 
 ```bash
+# View all logs
+docker compose logs -f
+
+# View specific service logs
+docker compose logs -f prep
+docker compose logs -f backup
+```
+
+## Advanced Usage
+
+### **Profile Management**
+
+```bash
+# Core services only (db + wordpress + backup)
+docker compose --profile core up -d
+
+# Ops services only (prep process)
+docker compose --profile ops up -d
+
+# Full stack
+docker compose up -d
+```
+
+### **Custom Backup Schedules**
+
+Edit `backup/crontab` to modify backup frequency:
+
+```bash
+# Daily at 2 AM
+0 2 * * * /usr/local/bin/run_once.sh
+
+# Weekly on Sunday at 3 AM
+0 3 * * 0 /usr/local/bin/run_once.sh
+```
+
+### **Domain Migration**
+
+```bash
+# Switch domain
 ./tools/switch-domain.sh old.example.com new.example.com
 ```
 
-This:
+## Security Notes
 
-* Rewrites all serialized URLs in DB
-* Updates `home` and `siteurl` to `https://new.example.com`
+- **Never commit `.env`** - Contains sensitive data
+- **Use strong passwords** - For database and backup encryption
+- **Regular backups** - Test restore procedures
+- **Monitor logs** - Check for errors and issues
 
-## 8) Restore & Migration Scenarios
+## Support
 
-### A) Rebuild the site from the **latest seed** (DB only)
+For issues or questions:
 
-Use this if you want to **reset** DB to the latest backup:
-
-```bash
-# Stop stack
-docker compose down
-
-# Remove ONLY the DB volume so MariaDB boots fresh
-docker volume rm wordpress-borg_db_data   # adjust prefix if your project dir name differs
-
-# Ensure a seed exists (created by your last backup)
-ls -l db-seed/seed.sql
-
-# Start again
-docker compose up -d
-# MariaDB auto-imports db-seed/seed.sql on first boot
-```
-
-### B) Full recovery from **Borg** (DB + files) to a new server
-
-1. Prepare new server: clone repo, set `.env`, DNS for new domain, open ports 80/443
-2. Bring up the stack to create volumes:
-
-```bash
-docker compose up -d --build
-```
-
-3. **Restore files** from a chosen Borg archive:
-
-* Extract to a local folder (on the host):
-
-```bash
-mkdir -p /tmp/wp-restore
-# List archives
-docker compose exec wp_backup sh -lc 'borg list "${BORG_REPO}"'
-# Choose a snapshot, then extract
-docker compose exec -T wp_backup sh -lc 'borg extract --list "${BORG_REPO}::wpdb-files-YYYY-MM-DD_HH-MM-SS" var/www/html/wp-content' \
-  > /tmp/wp-restore/extract.log 2>&1
-# Copy from the backup container to host if needed (alternative: mount)
-```
-
-* Copy restored files into the `wp_data` volume (preserve ownership for www-data):
-
-```bash
-# Example approach: run a helper container with both a bind and the volume mounted
-docker run --rm -v wordpress-borg_wp_data:/wpdata -v /tmp/wp-restore/var/www/html:/restore alpine \
-  sh -lc 'cp -a /restore/wp-content /wpdata/ && chown -R 33:33 /wpdata/wp-content'
-```
-
-> UID/GID `33:33` = `www-data` in Debian/Ubuntu images.
-
-4. **Restore DB** using the seed mechanism:
-
-* Place the desired `.sql` into `db-seed/seed.sql` (you can extract from `/dumps` in the same Borg archive)
-* Recreate the DB volume to force import:
-
-```bash
-docker compose down
-docker volume rm wordpress-borg_db_data
-docker compose up -d
-```
-
-5. **Issue TLS** for the new domain (see Section 4), then:
-
-```bash
-./tools/switch-domain.sh old.example.com new.example.com
-```
-
-6. Reload Nginx after TLS issuance/renewals:
-
-```bash
-docker compose exec nginx nginx -s reload
-```
-
-## 9) Maintenance cheatsheet
-
-```bash
-# View logs
-docker compose logs -f db wordpress nginx wp_backup wp_cli wp_cli_cron certbot
-
-# List Borg archives
-docker compose exec wp_backup sh -lc 'borg list "${BORG_REPO}"'
-
-# Prune explicitly (if needed)
-docker compose exec wp_backup sh -lc 'borg prune "${BORG_REPO}" --keep-daily 7 --keep-weekly 4 --keep-monthly 6'
-
-# Fix ownership after manual file copies
-docker compose exec wordpress chown -R www-data:www-data /var/www/html/wp-content
-
-# Run WP-CLI (any command)
-docker compose run --rm wpcli --path=/var/www/html plugin list
-```
-
-## 10) Troubleshooting
-
-* **Seed not imported?** DB volume probably not empty. Remove `db_data` and start again.
-* **Certbot issuance fails:** confirm DNS A/AAAA points to this server; port 80 open; Nginx serving `/.well-known/acme-challenge/`.
-* **`mysqldump` auth error:** check `MYSQL_*` values in `.env`.
-* **Permissions after file restore:** ensure `wp-content` belongs to `www-data` (`33:33`).
-* **Nginx still using old cert:** reload after issuance/renewal.
-
-## 11) Optional enhancements (later)
-
-* Auto-reload Nginx after cert renewal (small watcher sidecar)
-* Remote Borg repository (SSH): set `BORG_REPO=ssh://user@host:port/~/repo` and ensure SSH keys/known\_hosts; add `openssh-client` to backup image
-* Extra exclusions (cache folders) or include additional app folders in the Borg snapshot
+1. **Check logs**: `docker compose logs -f`
+2. **Test scenarios**: `./tools/test-backup-core.sh`
+3. **Clean restart**: `docker compose down -v && docker compose up -d`
+4. **Check volumes**: `docker volume ls`
 
 ---
 
-If you want, I can tailor a **remote Borg** setup (with SSH keys and known\_hosts) or add the **automatic Nginx reload** sidecar.
-
+**Happy blogging! 🚀**

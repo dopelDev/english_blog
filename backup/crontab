@@ -1,0 +1,19 @@
+# Cron configuration for automated backups
+# Format: minute hour day month day_of_week command
+
+# Daily backup at 2:00 AM
+0 2 * * * /usr/local/bin/run_once.sh >> /backup/logs/cron.log 2>&1
+
+# Weekly backup on Sundays at 3:00 AM
+0 3 * * 0 /usr/local/bin/run_once.sh >> /backup/logs/cron.log 2>&1
+
+# Monthly backup on day 1 at 4:00 AM
+0 4 1 * * /usr/local/bin/run_once.sh >> /backup/logs/cron.log 2>&1
+
+# Cleanup old logs (keep last 30 days)
+0 5 * * * find /backup/logs -name "*.log" -mtime +30 -delete
+
+# Repository integrity check (weekly)
+0 6 * * 0 borg check /backup/repos/backup-repo >> /backup/logs/check.log 2>&1
+
+# Empty line at the end (required by cron)
