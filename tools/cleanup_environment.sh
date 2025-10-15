@@ -11,6 +11,7 @@
 #
 # Flags:
 #   --volumes    Keep volumes (do not delete them)
+#   --keep-seeds Keep SQL seed files (do not delete them)
 #
 # Environment:
 #   PROJECT_NAME   Optional: project name
@@ -22,9 +23,41 @@
 set -euo pipefail
 
 KEEP_VOLUMES=false
-if [ "${1:-}" = "--volumes" ]; then
-  KEEP_VOLUMES=true
-fi
+KEEP_SEEDS=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --volumes)
+      KEEP_VOLUMES=true
+      shift
+      ;;
+    --keep-seeds)
+      KEEP_SEEDS=true
+      shift
+      ;;
+    --help)
+      echo "Usage: $0 [options]"
+      echo ""
+      echo "Options:"
+      echo "  --volumes     Keep volumes (do not delete them)"
+      echo "  --keep-seeds  Keep SQL seed files (do not delete them)"
+      echo "  --help        Show this help message"
+      echo ""
+      echo "Examples:"
+      echo "  $0                    # Full cleanup (removes everything)"
+      echo "  $0 --volumes          # Keep volumes, remove everything else"
+      echo "  $0 --keep-seeds      # Keep SQL seeds, remove everything else"
+      echo "  $0 --volumes --keep-seeds  # Keep both volumes and SQL seeds"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Use --help for usage information"
+      exit 1
+      ;;
+  esac
+done
 
 PROJECT_NAME="${PROJECT_NAME:-${COMPOSE_PROJECT_NAME:-$(basename "$(pwd)")}}"
 
@@ -86,35 +119,39 @@ else
   echo "   No ./db_data directory found."
 fi
 
-# === 6) Remove generated SQL seed files ===
-echo "➡️  Removing generated SQL seed files..."
-SEED_FILES_FOUND=false
+# === 6) Remove generated SQL seed files (unless --keep-seeds flag is set) ===
+if [ "$KEEP_SEEDS" = false ]; then
+  echo "➡️  Removing generated SQL seed files..."
+  SEED_FILES_FOUND=false
 
-# Remove timestamped seed files (pattern: seed_YYYYMMDD_HHMMSS.sql*)
-if ls ./db-seed/seed_*.sql* 1> /dev/null 2>&1; then
-  echo "   Removing timestamped seed files..."
-  rm -f ./db-seed/seed_*.sql* || true
-  SEED_FILES_FOUND=true
-fi
+  # Remove timestamped seed files (pattern: seed_YYYYMMDD_HHMMSS.sql*)
+  if ls ./db-seed/seed_*.sql* 1> /dev/null 2>&1; then
+    echo "   Removing timestamped seed files..."
+    rm -f ./db-seed/seed_*.sql* || true
+    SEED_FILES_FOUND=true
+  fi
 
-# Remove latest symlinks
-if [ -L "./db-seed/seed_latest.sql" ] || [ -L "./db-seed/seed_latest.sql.gz" ]; then
-  echo "   Removing latest symlinks..."
-  rm -f ./db-seed/seed_latest.sql* || true
-  SEED_FILES_FOUND=true
-fi
+  # Remove latest symlinks
+  if [ -L "./db-seed/seed_latest.sql" ] || [ -L "./db-seed/seed_latest.sql.gz" ]; then
+    echo "   Removing latest symlinks..."
+    rm -f ./db-seed/seed_latest.sql* || true
+    SEED_FILES_FOUND=true
+  fi
 
-# Remove any other generated seed files
-if ls ./db-seed/*.sql* 1> /dev/null 2>&1; then
-  echo "   Removing other SQL files..."
-  rm -f ./db-seed/*.sql* || true
-  SEED_FILES_FOUND=true
-fi
+  # Remove any other generated seed files
+  if ls ./db-seed/*.sql* 1> /dev/null 2>&1; then
+    echo "   Removing other SQL files..."
+    rm -f ./db-seed/*.sql* || true
+    SEED_FILES_FOUND=true
+  fi
 
-if [ "$SEED_FILES_FOUND" = true ]; then
-  echo "   ✅ Generated SQL seed files removed."
+  if [ "$SEED_FILES_FOUND" = true ]; then
+    echo "   ✅ Generated SQL seed files removed."
+  else
+    echo "   No generated SQL seed files found."
+  fi
 else
-  echo "   No generated SQL seed files found."
+  echo "🔹 Keeping SQL seed files (flag --keep-seeds is active)"
 fi
 
 # === 7) Final summary ===
