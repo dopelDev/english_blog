@@ -3,62 +3,77 @@
 # ==========================================================
 # Editor swap / temporary files
 # ==========================================================
-*.swp                  # Vim/Neovim swap files
-*.log                  # Log files created during container runs
-*.tmp                  # Temporary files
-*.bak                  # Backup files from editors
+# Vim/Neovim swap files
+# Log files created during container runs
+# Temporary files
+# Backup files from editors
+*.swp
+*.log
+*.tmp
+*.bak
 
 # ==========================================================
 # Environment files
 # ==========================================================
-.env                   # Main environment file (contains passwords & secrets)
-*.env                  # Any other env files, just in case
-!env_simple.env        # Keep the public example (safe to commit)
+# Main environment file (contains passwords & secrets)
+# Any other env files, just in case
+# Keep the public example (safe to commit)
+.env
+*.env
+!env_simple.env
 
 # ==========================================================
 # Docker runtime data and cache
 # ==========================================================
-docker-compose.override.yml  # Local overrides — developer-specific
-**/.dockerignore             # Avoid recursive inclusion
-**/.docker                   # Local Docker metadata (if any)
-**/tmp/                      # Temporary build/output folders
+# Local overrides — developer-specific
+# Avoid recursive inclusion
+# Local Docker metadata (if any)
+# Temporary build/output folders
+docker-compose.override.yml
+**/.dockerignore
+**/.docker
+**/tmp/
 
 # ==========================================================
 # Database seed and dumps
 # ==========================================================
-db-seed/seed.sql       # Contains exported data (sensitive)
-db-seed/*.sql          # Any other database dumps (sensitive)
-db-seed/*.sql.gz       # Compressed database dumps (sensitive)
-db-seed/*.sha256       # Checksum files for dumps
-db-seed/.db_status     # Database status file
-db-seed/.seed_status   # Seed status file
-!db-seed/10-prepare-seed.sh   # Keep initialization script in repo
+# Keep initialization script in repo
+db-seed/*
+!db-seed/10-prepare-seed.sh
 
 # ==========================================================
 # Backup repository
 # ==========================================================
-backups/               # Borg repo and backup archives (contains credentials)
-!backups/.gitkeep      # Keep folder structure only
+# Borg repo and backup archives (contains credentials)
+# Keep folder structure only
+backups/
+!backups/.gitkeep
 
 # ==========================================================
 # Certbot generated files (certificates / keys)
 # ==========================================================
-certbot/conf/*         # Certificates and private keys — sensitive
-!certbot/conf/.gitkeep # Keep folder
-certbot/www/*          # ACME HTTP challenge temp files
-!certbot/www/.gitkeep  # Keep folder
+# Certificates and private keys — sensitive
+# Keep folder
+# ACME HTTP challenge temp files
+# Keep folder
+certbot/conf/*
+!certbot/conf/.gitkeep
+certbot/www/*
+!certbot/www/.gitkeep
 
 # ==========================================================
 # WordPress & MariaDB persistent data
 # ==========================================================
-db_data/                  # Persistent volumes (db & wp-content)
-wp_data/                  # WordPress persistent data
+db_data/
+wp_data/
 
 # ==========================================================
 # Reverse proxy cache/logs
 # ==========================================================
-reverse-proxy/logs/    # Access/error logs
-reverse-proxy/cache/   # Proxy cache files
+# Access/error logs
+# Proxy cache files
+reverse-proxy/logs/
+reverse-proxy/cache/
 
 # ==========================================================
 # Safe files to keep under version control
